@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: coupons-app
+    ports:
+      - "7400:7400"
+    depends_on:
+      - mysql
+      - redis
+    environment:
+      COUPONS_PORT: 7400
+      COUPONS_DB_URL: jdbc:mysql://mysql:3306/coupon
+      COUPONS_DB_USER: db-user
+      COUPONS_DB_PASS: db-password
+      COUPONS_REDIS_HOST: redis
+      COUPONS_REDIS_PORT: 6379
+
+  mysql:
+    image: mysql:9.2
+    container_name: coupons-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: db-password
+      MYSQL_DATABASE: coupon
+      MYSQL_USER: db-user
+      MYSQL_PASSWORD: db-password
+    ports:
+      - "3399:3306"
+    volumes:
+      - ./database.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  redis:
+    image: redis:8.2.1
+    container_name: coupons-redis
+    ports:
+      - "6399:6379"
