@@ -24,6 +24,7 @@ class CouponsServiceTest {
     private GeoLocalizationService geoLocalizationService;
     private AppProperties appProperties;
     private CouponsService couponsService;
+    private CouponsCache couponsCache;
 
     private static final String COUNTRY_SUPPORTED_1 = "PL";
     private static final String IP_SUPPORTED_1 = "99.0.0.1";
@@ -39,7 +40,8 @@ class CouponsServiceTest {
         couponRepository = mock(CouponRepository.class);
         couponUsagesRepository = mock(CouponUsagesRepository.class);
         geoLocalizationService = mock(GeoLocalizationService.class);
-        couponsService = new CouponsService(ptm, appProperties, couponRepository, couponUsagesRepository, geoLocalizationService);
+        couponsCache = mock(CouponsCache.class);
+        couponsService = new CouponsService(ptm, appProperties, couponRepository, couponUsagesRepository, geoLocalizationService, couponsCache);
 
         when(appProperties.getSupportedCountries()).thenReturn(List.of(COUNTRY_SUPPORTED_1, COUNTRY_SUPPORTED_2));
 
@@ -62,13 +64,11 @@ class CouponsServiceTest {
         final var normalizedCode = "WIOSNA";
 
         var req = new CreateCouponRequest(code, 10, COUNTRY_SUPPORTED_1);
-        when(couponRepository.findByCodeIgnoreCase(normalizedCode))
+        when(couponsCache.getCachedCoupon(normalizedCode))
                 .thenReturn(Optional.of(
-                        new Coupon(1,
+                        new CachedCoupon(1,
                                 normalizedCode,
-                                LocalDate.now(),
-                                1000,
-                                1000,
+                                false,
                                 COUNTRY_SUPPORTED_1)
                 ));
         assertThatThrownBy(() -> couponsService.createCoupon(req))
@@ -78,7 +78,7 @@ class CouponsServiceTest {
     @Test
     void createCoupon_success() {
         var req = new CreateCouponRequest("Wiosna", 10, COUNTRY_SUPPORTED_1);
-        when(couponRepository.findByCodeIgnoreCase("WIOSNA")).thenReturn(Optional.empty());
+        when(couponsCache.getCachedCoupon("WIOSNA")).thenReturn(Optional.empty());
 
         var result = couponsService.createCoupon(req);
 
@@ -97,7 +97,7 @@ class CouponsServiceTest {
     @Test
     void useCoupon_notFound_throws() {
         var req = new UseCouponRequest("Wiosna", 1111, IP_SUPPORTED_1);
-        when(couponRepository.findByCodeIgnoreCase("WIOSNA")).thenReturn(Optional.empty());
+        when(couponsCache.getCachedCoupon("WIOSNA")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> couponsService.useCoupon(req))
                 .isInstanceOf(CouponNotFoundException.class);
@@ -110,13 +110,12 @@ class CouponsServiceTest {
 
         var req = new UseCouponRequest(code, 1111, IP_SUPPORTED_1);
 
-        var coupon = new Coupon();
+        var coupon = new CachedCoupon();
         coupon.setId(1);
-        coupon.setUsagesRemaining(0);
-        coupon.setUsagesMax(10);
+        coupon.setExhausted(true);
         coupon.setCode(normalizedCode);
         coupon.setCountry(COUNTRY_SUPPORTED_1);
-        when(couponRepository.findByCodeIgnoreCase(normalizedCode)).thenReturn(Optional.of(coupon));
+        when(couponsCache.getCachedCoupon(normalizedCode)).thenReturn(Optional.of(coupon));
 
         assertThatThrownBy(() -> couponsService.useCoupon(req))
                 .isInstanceOf(CouponExhaustedException.class);
@@ -129,13 +128,12 @@ class CouponsServiceTest {
 
         var req = new UseCouponRequest(code, 1111, IP_SUPPORTED_1);
 
-        var coupon = new Coupon();
+        var coupon = new CachedCoupon();
         coupon.setId(1);
-        coupon.setUsagesRemaining(5);
-        coupon.setUsagesMax(5);
+        coupon.setExhausted(false);
         coupon.setCode(normalizedCode);
         coupon.setCountry(COUNTRY_SUPPORTED_2);
-        when(couponRepository.findByCodeIgnoreCase(normalizedCode)).thenReturn(Optional.of(coupon));
+        when(couponsCache.getCachedCoupon(normalizedCode)).thenReturn(Optional.of(coupon));
 
         assertThatThrownBy(() -> couponsService.useCoupon(req))
                 .isInstanceOf(CouponUnavailableForUserCountryException.class);
@@ -151,13 +149,11 @@ class CouponsServiceTest {
 
         var req = new UseCouponRequest(code, userId, IP_SUPPORTED_1);
 
-        when(couponRepository.findByCodeIgnoreCase(normalizedCode))
+        when(couponsCache.getCachedCoupon(normalizedCode))
                 .thenReturn(Optional.of(
-                        new Coupon(couponId,
+                        new CachedCoupon(couponId,
                                 normalizedCode,
-                                LocalDate.now(),
-                                10,
-                                10,
+                                false,
                                 COUNTRY_SUPPORTED_1)
                 ));
         when(couponUsagesRepository.insertUsage(anyInt(), anyInt())).thenReturn(1);
@@ -180,13 +176,12 @@ class CouponsServiceTest {
 
         var req = new UseCouponRequest(code, userId, IP_SUPPORTED_1);
 
-        var coupon = new Coupon();
+        var coupon = new CachedCoupon();
         coupon.setId(couponId);
-        coupon.setUsagesRemaining(5);
-        coupon.setUsagesMax(5);
+        coupon.setExhausted(false);
         coupon.setCode(normalizedCode);
         coupon.setCountry(COUNTRY_SUPPORTED_1);
-        when(couponRepository.findByCodeIgnoreCase(normalizedCode)).thenReturn(Optional.of(coupon));
+        when(couponsCache.getCachedCoupon(normalizedCode)).thenReturn(Optional.of(coupon));
         doThrow(DataIntegrityViolationException.class).when(couponUsagesRepository).insertUsage(couponId, userId);
 
         assertThatThrownBy(() -> couponsService.useCoupon(req))

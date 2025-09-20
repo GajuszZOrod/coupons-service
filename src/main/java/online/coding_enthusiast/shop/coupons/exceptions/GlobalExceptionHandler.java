@@ -1,5 +1,6 @@
 package online.coding_enthusiast.shop.coupons.exceptions;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -10,6 +11,7 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 
 @ControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(CouponExhaustedException.class)
@@ -70,13 +72,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<?> handleRuntimeException(Exception e) {
+        log.error("Application error ", e); // TODO: remove this logging
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(
                 "Application error."
-                // TODO: remove the below details (this is for development phase only!)
-                + "\n" + e.getClass() + ": " + e.getMessage() + "\n"
-                + Arrays.stream(e.getStackTrace())
-                        .map(StackTraceElement::toString)
-                        .collect(Collectors.joining("\n"))
         );
     }
 }

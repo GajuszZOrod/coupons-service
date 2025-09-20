@@ -1,14 +1,10 @@
 package online.coding_enthusiast.shop.coupons;
 
-import jakarta.transaction.Transactional;
 import online.coding_enthusiast.shop.coupons.data.Coupon;
 import online.coding_enthusiast.shop.coupons.dto.CachedCoupon;
-import online.coding_enthusiast.shop.coupons.dto.CouponInfo;
 import online.coding_enthusiast.shop.coupons.dto.CreateCouponRequest;
 import online.coding_enthusiast.shop.coupons.dto.UseCouponRequest;
 import online.coding_enthusiast.shop.coupons.exceptions.*;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -26,18 +22,21 @@ public class CouponsService {
     private final CouponRepository couponRepository;
     private final CouponUsagesRepository couponUsagesRepository;
     private final GeoLocalizationService geoLocalizationService;
+    private final CouponsCache couponsCache;
 
     TransactionTemplate transactionTemplate;
     public CouponsService(PlatformTransactionManager ptm,
                           AppProperties appProperties,
                           CouponRepository couponRepository,
                           CouponUsagesRepository couponUsagesRepository,
-                          GeoLocalizationService geoLocalizationService) {
+                          GeoLocalizationService geoLocalizationService,
+                          CouponsCache couponsCache) {
         this.transactionTemplate = new TransactionTemplate(ptm);
         this.appProperties = appProperties;
         this.couponRepository = couponRepository;
         this.couponUsagesRepository = couponUsagesRepository;
         this.geoLocalizationService = geoLocalizationService;
+        this.couponsCache = couponsCache;
     }
 
     public String createCoupon(CreateCouponRequest req) {
@@ -48,7 +47,7 @@ public class CouponsService {
             throw new CountryUnsupportedException();
         }
 
-        var existingCoupon = getCouponInfo(normalizedCode);
+        var existingCoupon = couponsCache.getCachedCoupon(normalizedCode);
         if (existingCoupon.isPresent()) {
             throw new CouponAlreadyExistsException();
         }
@@ -60,7 +59,7 @@ public class CouponsService {
         createdCoupon.setCountry(req.country());
         couponRepository.save(createdCoupon);
 
-        cacheCoupon(createdCoupon);
+        couponsCache.cacheCoupon(new CachedCoupon(createdCoupon));
 
         return "Coupon created successfully.";
     }
@@ -74,7 +73,7 @@ public class CouponsService {
             throw new CountryUnsupportedException();
         }
 
-        var couponInfo = getCouponInfo(normalizedCode);
+        var couponInfo = couponsCache.getCachedCoupon(normalizedCode);
 
         if (couponInfo.isEmpty()) {
             throw new CouponNotFoundException();
@@ -93,42 +92,21 @@ public class CouponsService {
         return "Coupon used successfully.";
     }
 
-    private Optional<CouponInfo> getCouponInfo(String code) {
-        var coupon = getCachedCoupon(code);
-        return coupon.map(c -> new CouponInfo(c, code));
-    }
-
-    @Cacheable(value = "couponByCode", unless = "#result.isEmpty()")
-    private Optional<CachedCoupon> getCachedCoupon(String code) {
-        return couponRepository.findByCodeIgnoreCase(code)
-                .map(CachedCoupon::new);
-    }
-
-    @CachePut(value = "couponByCode", key = "#toCache.getCode()")
-    private CachedCoupon cacheCoupon(Coupon toCache) {
-        return new CachedCoupon(toCache);
-    }
-
-    @CachePut(value = "couponByCode", key = "#code")
-    private CachedCoupon cacheCoupon(String code, CachedCoupon toCache) {
-        return toCache;
-    }
-
-    private void useCoupon(CouponInfo couponInfo, int userId) {
+    private void useCoupon(CachedCoupon cachedCoupon, int userId) {
         transactionTemplate.executeWithoutResult(status -> {
             try {
-                couponUsagesRepository.insertUsage(couponInfo.getId(), userId);
+                couponUsagesRepository.insertUsage(cachedCoupon.getId(), userId);
 
-                var updated = couponRepository.decrementRemaining(couponInfo.getCode());
+                var updated = couponRepository.decrementRemaining(cachedCoupon.getCode());
                 if (updated == 0) {
-                    var exhaustedCoupon = new CachedCoupon(couponInfo.getId(), true, couponInfo.getCountry());
-                    cacheCoupon(couponInfo.getCode(), exhaustedCoupon);
+                    cachedCoupon.setExhausted(true);
+                    couponsCache.cacheCoupon(cachedCoupon);
 
                     throw new CouponExhaustedException();
                 }
             }
             catch (DataIntegrityViolationException e) {
-                throw new CouponAlreadyUsedException(); // TODO: check whether the error is about key uniqueness, or something else
+                throw new CouponAlreadyUsedException();
             }
         });
     }
